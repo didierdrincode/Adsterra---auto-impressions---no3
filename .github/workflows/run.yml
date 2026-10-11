@@ -1,0 +1,23 @@
+name: Traffic and Proxy Pipeline
+
+on:
+  workflow_dispatch: # Allows manual triggering from the GitHub Actions tab
+  # schedule:
+  #   - cron: '0 */5 * * *' # Optional cron schedule if needed later
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Execute run_all.sh Pipeline
+        run: |
+          chmod +x run_all.sh
+          ./run_all.sh

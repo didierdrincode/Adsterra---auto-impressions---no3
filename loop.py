@@ -1,9 +1,9 @@
 """
 loop.py
 -------
-Opens N tabs per cycle through random working proxies, loads the target,
-triggers a smart top-right click with cursor pointer verification, verifies 
-popunder tab spawning, reloads if necessary, dwells, and cleans up.
+Opens N tabs per cycle through filtered residential proxies, loads the target,
+triggers a reliable center-view click to spawn the popunder, monitors tab spawning,
+dwells, and cleans up.
 
 Usage:
     python loop.py
@@ -207,7 +207,8 @@ def load_proxies() -> list[dict]:
             datacenter.append(proxy)
             
     print(f"[*] Proxy Pool Sorted: {len(residential)} residential-like, {len(datacenter)} datacenter")
-    return residential + datacenter
+    # EXCLUDE DATACENTER PROXIES TO PREVENT AD NETWORK BLOCKING
+    return residential if residential else datacenter
 
 
 def refresh_proxies() -> None:
@@ -231,7 +232,7 @@ async def build_context(browser, proxy):
         locale=locale,
         timezone_id=timezone,
         color_scheme="light",
-        ignore_https_errors=True,  # Bypass proxy SSL cert issues
+        ignore_https_errors=True,
     )
     await ctx.add_init_script(stealth_js(locale))
     await ctx.add_init_script(CANVAS_JS % random.randint(0, 255))
@@ -251,7 +252,6 @@ async def run_tab(browser, proxy, urls, sem, results) -> None:
             ctx.on("page", lambda new_pg: spawned_pages.append(new_pg))
             pg = await ctx.new_page()
 
-            # Isolate navigation so non-2xx error status codes don't crash the worker
             try:
                 resp = await pg.goto(url, wait_until="domcontentloaded", timeout=LOAD_TIMEOUT)
                 status = resp.status if resp else 0
@@ -265,7 +265,6 @@ async def run_tab(browser, proxy, urls, sem, results) -> None:
 
             results["total_load_time"] += time.time() - t1
 
-            # Count as a loaded attempt to reflect activity in logs
             results["loaded"] += 1
             if resp and resp.status < 400:
                 if len(results["samples"]) < 3:
@@ -277,52 +276,25 @@ async def run_tab(browser, proxy, urls, sem, results) -> None:
             # Jittered dwell time before clicking
             await asyncio.sleep(random.uniform(1.0, 3.0))
 
-            # Smart Popunder Trigger: Top-right margin click with pointer cursor verification & reload fallback
+            # Trigger reliable interaction click to spawn popunder
             if CLICK:
-                clicked_success = False
-                for attempt in range(2):
-                    try:
-                        viewport = pg.viewport_size
-                        w = viewport["width"] if viewport else 1920
-                        
-                        # Top-right coordinates with a small margin space
-                        target_x = w - random.randint(15, 60)
-                        target_y = random.randint(10, 45)
-                        
-                        await pg.mouse.move(target_x, target_y)
-                        await asyncio.sleep(0.3)
-                        
-                        # Verify if cursor is a pointer at target coordinates
-                        is_pointer = await pg.evaluate(f"""
-                            () => {{
-                                const el = document.elementFromPoint({target_x}, {target_y});
-                                if (!el) return false;
-                                const style = window.getComputedStyle(el);
-                                const parentStyle = el.parentElement ? window.getComputedStyle(el.parentElement) : {{}};
-                                return style.cursor === 'pointer' || parentStyle.cursor === 'pointer';
-                            }}
-                        """)
-                        
-                        initial_spawn_count = len(spawned_pages)
-                        await pg.mouse.click(target_x, target_y)
-                        await asyncio.sleep(1.5)
-                        
-                        # Check if a new popunder tab successfully spawned
-                        if len(spawned_pages) > initial_spawn_count:
-                            clicked_success = True
-                            break
-                        else:
-                            if attempt == 0 and not is_pointer:
-                                # Reload page if cursor wasn't a pointer and popunder didn't trigger
-                                await pg.reload(wait_until="domcontentloaded", timeout=LOAD_TIMEOUT)
-                                await asyncio.sleep(2.0)
-                    except Exception:
-                        pass
+                try:
+                    viewport = pg.viewport_size
+                    w = viewport["width"] // 2 if viewport else 960
+                    h = viewport["height"] // 2 if viewport else 540
+                    
+                    initial_spawn_count = len(spawned_pages)
+                    await pg.mouse.click(w + random.randint(-40, 40), h + random.randint(-40, 40))
+                    await asyncio.sleep(1.5)
+                    
+                    if len(spawned_pages) > initial_spawn_count:
+                        print(f"[CLICK SUCCESS] Popunder tab spawned.")
+                except Exception:
+                    pass
 
             # Dwell to register the impression
             await asyncio.sleep(random.uniform(DWELL * 0.6, DWELL * 1.6))
 
-            # Clean up spawned popunder tabs
             for sp in spawned_pages:
                 try:
                     await sp.close()
